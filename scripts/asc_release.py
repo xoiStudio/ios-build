@@ -112,7 +112,7 @@ def main():
     build_ver = pre[build["relationships"]["preReleaseVersion"]["data"]["id"]]["attributes"]["version"]
     print(f"build {build['attributes']['version']} (version {build_ver})")
 
-    editable = ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY")
+    editable = ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY")
     vers = get(f"/v1/apps/{app_id}/appStoreVersions", **{"filter[platform]": "IOS", "limit": 10})["data"]
     ver = next((v for v in vers if v["attributes"]["appStoreState"] in editable), None)
     if ver is None:
