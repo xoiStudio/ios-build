@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
@@ -172,8 +173,19 @@ def main():
                                                                 "messagingAndChat", "userGeneratedContent", "parentalControls",
                                                                 "ageAssurance", "healthOrWellnessTopics")):
                 attrs[k] = False
-        call("PATCH", f"/v1/ageRatingDeclarations/{decl['id']}",
-             {"data": {"type": "ageRatingDeclarations", "id": decl["id"], "attributes": attrs}})
+        # Apple thêm câu hỏi mới theo thời gian (vd. socialMedia 2026) ⇒ báo thiếu thuộc tính nào thì điền "không" rồi thử lại.
+        for _ in range(12):
+            try:
+                call("PATCH", f"/v1/ageRatingDeclarations/{decl['id']}",
+                     {"data": {"type": "ageRatingDeclarations", "id": decl["id"], "attributes": attrs}}, quiet=True)
+                return
+            except RuntimeError as e:
+                m = re.search(r"attribute '(\w+)'", str(e))
+                if not m or m.group(1) in attrs:
+                    raise
+                attrs[m.group(1)] = "NONE" if m.group(1) in enums else False
+                print(f"  + {m.group(1)}={attrs[m.group(1)]}")
+        raise RuntimeError("phân loại tuổi: quá nhiều thuộc tính thiếu")
     step("phân loại tuổi", age)
 
     step("quyền nội dung", lambda: call("PATCH", f"/v1/apps/{app_id}", {"data": {"type": "apps", "id": app_id, "attributes": {
