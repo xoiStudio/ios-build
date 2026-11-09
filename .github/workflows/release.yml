@@ -1,0 +1,39 @@
+# Phát hành App Store (metadata + ảnh + IAP + gửi duyệt) cho MỌI game — BẢN GỐC ở GameDevHub/build/ios/release.yml,
+# đẩy sang repo CI bằng `gdh ios install-workflow`. Chạy bằng `gdh ios release` (dựng bundle, gắn vào Release, chạy workflow).
+name: App Store release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag của Release chứa appstore.zip"
+        required: true
+      bundle_id:
+        description: "Bundle id của game"
+        required: true
+      submit:
+        description: "true = gửi duyệt khi không có lỗi"
+        required: false
+        default: "false"
+run-name: "Release ${{ inputs.bundle_id }} · ${{ inputs.tag }} · submit=${{ inputs.submit }}"
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyjwt cryptography requests
+      - name: Tải bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "appstore.zip"
+          mkdir -p bundle && unzip -q appstore.zip -d bundle && find bundle -type f | sort
+      - name: App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: python scripts/asc_release.py bundle ${{ inputs.submit == 'true' && '--submit' || '' }}
