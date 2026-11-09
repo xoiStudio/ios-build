@@ -1,0 +1,57 @@
+# Tải ảnh chụp màn hình App Store cho MỌI game XoiGame (Ubuntu — rẻ hơn macOS 10 lần).
+# BẢN GỐC: GameDevHub/build/ios/store.yml — đẩy sang repo CI bằng `gdh ios install-workflow`.
+#
+# `gdh ios screenshots` nén ảnh (JPEG, tên sắp theo thứ tự hiển thị) thành screenshots.zip, gắn vào một
+# GitHub Release rồi chạy workflow này với bundle_id + app_version. deliver tự nhận loại máy theo kích thước
+# ảnh (2868x1320 = iPhone 6.9", 2752x2064 = iPad 13"). Lý do đi đường này: trình duyệt của AI không chọn file
+# được và App Store Connect chặn fetch từ localhost (pattern hub 2026-10-01).
+name: App Store screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag của Release chứa screenshots.zip (bỏ trống = dùng fastlane/screenshots trong repo)"
+        required: false
+        default: ""
+      bundle_id:
+        description: "Bundle id của game"
+        required: false
+        default: "com.xoigame.lasttowermonster"
+      app_version:
+        description: "Phiên bản App Store đang soạn (vd. 1.0)"
+        required: false
+        default: "1.0"
+
+run-name: "Screenshots ${{ inputs.bundle_id }} ${{ inputs.app_version }} · ${{ inputs.tag }}"
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - run: gem install fastlane --no-document
+
+      - name: Tải ảnh từ Release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "screenshots.zip"
+          rm -rf fastlane/screenshots && mkdir -p fastlane/screenshots
+          unzip -q screenshots.zip -d fastlane/screenshots
+          find fastlane/screenshots -type f | sort
+
+      - name: deliver
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+          APP_VERSION: ${{ inputs.app_version }}
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: fastlane screenshots

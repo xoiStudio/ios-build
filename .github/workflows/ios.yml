@@ -1,0 +1,89 @@
+# Build iOS cho MỌI game XoiGame trên máy Mac của GitHub — BẢN GỐC nằm ở GameDevHub/build/ios/ios.yml,
+# đẩy sang repo CI bằng `gdh ios install-workflow`. Đừng sửa thẳng trên repo CI.
+#
+# Project Xcode do Unity xuất trên Windows, `gdh ios push` nén thành ios-xcode.tar.gz, gắn vào một
+# GitHub Release của repo này rồi chạy workflow với bundle_id của game.
+#
+#  · Chưa có secret ASC_* → chỉ build KHÔNG ký (kiểm project Xcode biên dịch được).
+#  · Có đủ ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 / CERT_PRIVATE_KEY → ký bằng chứng chỉ THƯỜNG
+#    (codemagic-cli-tools) rồi tải lên App Store Connect (TestFlight). KHÔNG dùng cloud signing
+#    (-allowProvisioningUpdates): Apple từ chối "Invalid Signature" (pitfall hub 2026-10-01).
+#  · App phải có sẵn bản ghi trên App Store Connect (My Apps ▸ +) với đúng bundle id, không thì bước publish lỗi.
+name: iOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag của Release chứa ios-xcode.tar.gz"
+        required: true
+      bundle_id:
+        description: "Bundle id của game (vd. com.xoigame.stickmanarcherduel)"
+        required: false
+        default: "com.xoigame.lasttowermonster"
+
+run-name: "iOS ${{ inputs.bundle_id }} · ${{ inputs.tag }}"
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      TEAM_ID: 3VBMH5K7LL
+      BUNDLE_ID: ${{ inputs.bundle_id }}
+      HAS_KEY: ${{ secrets.ASC_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tải project Xcode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "ios-xcode.tar.gz"
+          mkdir xcode && tar -xzf ios-xcode.tar.gz -C xcode
+          rm ios-xcode.tar.gz
+
+      - name: Chọn Xcode mới nhất
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: pod install
+        working-directory: xcode
+        run: pod install --repo-update
+
+      - name: Build không ký (chưa có API key)
+        if: env.HAS_KEY != 'true'
+        working-directory: xcode
+        run: |
+          xcodebuild -workspace Unity-iPhone.xcworkspace -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build | tail -200
+
+      - name: Ký + tải lên TestFlight (codemagic-cli-tools, chứng chỉ thường)
+        if: env.HAS_KEY == 'true'
+        working-directory: xcode
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.ASC_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.ASC_KEY_P8 }}
+          CERT_PRIVATE_KEY: ${{ secrets.CERT_PRIVATE_KEY }}
+        run: |
+          set -e
+          python3 -m venv "$RUNNER_TEMP/venv" && source "$RUNNER_TEMP/venv/bin/activate"
+          pip install -q codemagic-cli-tools
+          # Khoá CỐ ĐỊNH của chứng chỉ Distribution (secret CERT_PRIVATE_KEY). KHÔNG thu hồi chứng chỉ sau build:
+          # Apple kiểm lại chữ ký lúc duyệt — chứng chỉ bị thu hồi => ITMS-90035 Invalid Signature.
+          printf '%s' "$CERT_PRIVATE_KEY" > "$RUNNER_TEMP/cert_key"
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE \
+            --certificate-key=@file:"$RUNNER_TEMP/cert_key" --create
+          keychain add-certificates
+          xcode-project use-profiles
+          xcode-project build-ipa --workspace Unity-iPhone.xcworkspace --scheme Unity-iPhone
+          IPA=$(ls "$PWD"/build/ios/ipa/*.ipa)
+          app-store-connect publish --path "$IPA"
+
+      - name: Xoá khoá
+        if: always()
+        run: rm -rf ~/.appstoreconnect "$RUNNER_TEMP/cert_key"

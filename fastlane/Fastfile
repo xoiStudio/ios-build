@@ -1,0 +1,23 @@
+# BẢN GỐC: GameDevHub/build/ios/Fastfile — đẩy sang repo CI bằng `gdh ios install-workflow`.
+# Đẩy ảnh chụp màn hình App Store (fastlane/screenshots/<locale>) bằng App Store Connect API key.
+# deliver nhận dạng loại máy theo kích thước ảnh: 2868x1320 = iPhone 6.9", 2752x2064 = iPad 13".
+lane :screenshots do
+  api_key = app_store_connect_api_key(
+    key_id: ENV["ASC_KEY_ID"],
+    issuer_id: ENV["ASC_ISSUER_ID"],
+    key_content: ENV["ASC_KEY_P8"]
+  )
+  deliver(
+    api_key: api_key,
+    app_identifier: ENV.fetch("BUNDLE_ID", "com.xoigame.lasttowermonster"),
+    app_version: ENV.fetch("APP_VERSION", "1.0"),
+    skip_binary_upload: true,
+    skip_metadata: true,
+    skip_app_version_update: true,
+    screenshots_path: "fastlane/screenshots",
+    overwrite_screenshots: true,
+    force: true,
+    submit_for_review: false,
+    run_precheck_before_submit: false
+  )
+end
