@@ -228,8 +228,10 @@ def main():
                         "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
                         "relationships": {"appStoreVersionLocalization": rel("appStoreVersionLocalizations", vloc["id"])}}})["data"]
         olds = get(f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]
-        if len(olds) == len(shots[:10]) and all((o["attributes"].get("assetDeliveryState") or {}).get("state") == "COMPLETE"
-                                                and o["attributes"].get("fileName") == f for o, f in zip(olds, shots[:10])):
+        # Đủ ảnh, đúng tên, không cái nào FAILED ⇒ giữ nguyên (ảnh đang xử lý mà xoá đi tải lại là Apple xử lý lại từ đầu).
+        if len(olds) == len(shots[:10]) and all(o["attributes"].get("fileName") == f and
+                                                (o["attributes"].get("assetDeliveryState") or {}).get("state") != "FAILED"
+                                                for o, f in zip(olds, shots[:10])):
             print("  (đã đủ ảnh, giữ nguyên)")
             return
         for old in olds:
@@ -323,8 +325,8 @@ def main():
         print("\nKHÔNG gửi duyệt vì còn lỗi ở trên.")
     else:
         def wait_assets():
-            """Ảnh vừa tải lên còn 'Asset is being processed' thì gửi duyệt bị 409 — chờ tối đa ~6 phút."""
-            for _ in range(36):
+            """Ảnh vừa tải lên còn 'Asset is being processed' thì gửi duyệt bị 409 — chờ tối đa ~15 phút."""
+            for _ in range(90):
                 sets = get(f"/v1/appStoreVersionLocalizations/{vloc['id']}/appScreenshotSets")["data"]
                 states = [(x["attributes"].get("assetDeliveryState") or {}).get("state")
                           for st in sets for x in get(f"/v1/appScreenshotSets/{st['id']}/appScreenshots")["data"]]
@@ -334,7 +336,7 @@ def main():
                 if any(st == "FAILED" for st in states):
                     raise RuntimeError(f"Apple xử lý ảnh FAILED: {states}")
                 time.sleep(10)
-            raise RuntimeError("ảnh chưa xử lý xong sau 6 phút")
+            raise RuntimeError("ảnh chưa xử lý xong sau 15 phút")
         step("chờ Apple xử lý ảnh", wait_assets)
 
         def submit():
