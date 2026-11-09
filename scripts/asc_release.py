@@ -227,7 +227,12 @@ def main():
             sset = call("POST", "/v1/appScreenshotSets", {"data": {"type": "appScreenshotSets",
                         "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
                         "relationships": {"appStoreVersionLocalization": rel("appStoreVersionLocalizations", vloc["id"])}}})["data"]
-        for old in get(f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]:
+        olds = get(f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]
+        if len(olds) == len(shots[:10]) and all((o["attributes"].get("assetDeliveryState") or {}).get("state") == "COMPLETE"
+                                                and o["attributes"].get("fileName") == f for o, f in zip(olds, shots[:10])):
+            print("  (đã đủ ảnh, giữ nguyên)")
+            return
+        for old in olds:
             call("DELETE", f"/v1/appScreenshots/{old['id']}")
         for f in shots[:10]:
             upload("/v1/appScreenshots", "appScreenshots", "appScreenshotSet", "appScreenshotSets", sset["id"],
@@ -317,6 +322,21 @@ def main():
     elif ERRORS:
         print("\nKHÔNG gửi duyệt vì còn lỗi ở trên.")
     else:
+        def wait_assets():
+            """Ảnh vừa tải lên còn 'Asset is being processed' thì gửi duyệt bị 409 — chờ tối đa ~6 phút."""
+            for _ in range(36):
+                sets = get(f"/v1/appStoreVersionLocalizations/{vloc['id']}/appScreenshotSets")["data"]
+                states = [(x["attributes"].get("assetDeliveryState") or {}).get("state")
+                          for st in sets for x in get(f"/v1/appScreenshotSets/{st['id']}/appScreenshots")["data"]]
+                if all(st == "COMPLETE" for st in states):
+                    print(f"  ảnh xử lý xong ({len(states)})")
+                    return
+                if any(st == "FAILED" for st in states):
+                    raise RuntimeError(f"Apple xử lý ảnh FAILED: {states}")
+                time.sleep(10)
+            raise RuntimeError("ảnh chưa xử lý xong sau 6 phút")
+        step("chờ Apple xử lý ảnh", wait_assets)
+
         def submit():
             subs = get(f"/v1/apps/{app_id}/reviewSubmissions", **{"filter[platform]": "IOS", "filter[state]": "READY_FOR_REVIEW"})["data"]
             sub = subs[0] if subs else call("POST", "/v1/reviewSubmissions", {"data": {"type": "reviewSubmissions",
