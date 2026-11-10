@@ -88,10 +88,37 @@ def all_pages(path, **params):
     return out
 
 
+def cancel_inflight(app_id, editable):
+    """
+    Huỷ đợt gửi duyệt đang treo (WAITING_FOR_REVIEW / IN_REVIEW / UNRESOLVED_ISSUES) để thay build khác vào CÙNG bản ghi
+    phiên bản (app chưa phát hành lần nào: đổi versionString được). Mất chỗ trong hàng chờ ⇒ chỉ chạy khi tác giả đồng ý.
+    Chờ tới khi phiên bản về trạng thái soạn được (thường DEVELOPER_REJECTED), tối đa ~10 phút.
+    """
+    subs = get(f"/v1/apps/{app_id}/reviewSubmissions", **{"filter[platform]": "IOS",
+               "filter[state]": "WAITING_FOR_REVIEW,IN_REVIEW,UNRESOLVED_ISSUES"})["data"]
+    if not subs:
+        print("  (không có đợt gửi nào đang treo)")
+        return
+    for sub in subs:
+        print(f"  huỷ reviewSubmission {sub['id']} ({sub['attributes'].get('state')})")
+        call("PATCH", f"/v1/reviewSubmissions/{sub['id']}", {"data": {"type": "reviewSubmissions", "id": sub["id"],
+             "attributes": {"canceled": True}}})
+    for _ in range(60):
+        vers = get(f"/v1/apps/{app_id}/appStoreVersions", **{"filter[platform]": "IOS", "limit": 10})["data"]
+        states = [v["attributes"]["appStoreState"] for v in vers]
+        if any(s in editable for s in states):
+            print(f"  phiên bản soạn được lại: {states}")
+            return
+        time.sleep(10)
+    raise RuntimeError(f"huỷ xong mà phiên bản chưa soạn được sau 10 phút: {states}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("bundle_dir")
     ap.add_argument("--submit", action="store_true")
+    ap.add_argument("--replace-inflight", action="store_true",
+                    help="huỷ đợt gửi đang chờ/đang duyệt rồi dùng lại chính bản ghi phiên bản đó cho build mới (tác giả phải đồng ý)")
     a = ap.parse_args()
     d = a.bundle_dir
     spec = json.load(open(os.path.join(d, "appstore.json"), encoding="utf-8"))
@@ -113,6 +140,10 @@ def main():
     print(f"build {build['attributes']['version']} (version {build_ver})")
 
     editable = ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY")
+    if a.replace_inflight:
+        step("huỷ đợt gửi đang chờ duyệt", lambda: cancel_inflight(app_id, editable))
+        if ERRORS:   # huỷ hỏng thì dừng — đừng để bước sau tự tạo bản ghi phiên bản mới
+            sys.exit("Dừng: " + ERRORS[-1][:600])
     vers = get(f"/v1/apps/{app_id}/appStoreVersions", **{"filter[platform]": "IOS", "limit": 10})["data"]
     ver = next((v for v in vers if v["attributes"]["appStoreState"] in editable), None)
     if ver is None:

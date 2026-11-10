@@ -14,7 +14,11 @@ on:
         description: "true = gửi duyệt khi không có lỗi"
         required: false
         default: "false"
-run-name: "Release ${{ inputs.bundle_id }} · ${{ inputs.tag }} · submit=${{ inputs.submit }}"
+      replace_inflight:
+        description: "true = huỷ đợt gửi đang chờ/đang duyệt rồi thay build mới vào (mất chỗ trong hàng chờ)"
+        required: false
+        default: "false"
+run-name: "Release ${{ inputs.bundle_id }} · ${{ inputs.tag }} · submit=${{ inputs.submit }} · replace=${{ inputs.replace_inflight }}"
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -36,4 +40,4 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: python scripts/asc_release.py bundle ${{ inputs.submit == 'true' && '--submit' || '' }}
+        run: python scripts/asc_release.py bundle ${{ inputs.submit == 'true' && '--submit' || '' }} ${{ inputs.replace_inflight == 'true' && '--replace-inflight' || '' }}
