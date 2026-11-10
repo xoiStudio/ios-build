@@ -117,6 +117,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("bundle_dir")
     ap.add_argument("--submit", action="store_true")
+    ap.add_argument("--build", default="",
+                    help="số build phải dùng: chờ tới khi nó VALID (tối đa ~45 phút) thay vì lấy build VALID mới nhất")
     ap.add_argument("--replace-inflight", action="store_true",
                     help="huỷ đợt gửi đang chờ/đang duyệt rồi dùng lại chính bản ghi phiên bản đó cho build mới (tác giả phải đồng ý)")
     a = ap.parse_args()
@@ -129,11 +131,19 @@ def main():
     app_id = app["id"]
     print(f"app {app_id} {app['attributes']['name']}")
 
-    # Build mới nhất đã xử lý xong.
-    builds = get("/v1/builds", **{"filter[app]": app_id, "filter[processingState]": "VALID", "sort": "-uploadedDate",
-                                  "limit": 5, "include": "preReleaseVersion"})
+    # Build mới nhất đã xử lý xong — hoặc ĐÚNG số build được chỉ định (vừa tải lên thì Apple còn xử lý: chờ).
+    q = {"filter[app]": app_id, "filter[processingState]": "VALID", "sort": "-uploadedDate", "limit": 5,
+         "include": "preReleaseVersion"}
+    if a.build:
+        q["filter[version]"] = a.build
+    builds = get("/v1/builds", **q)
+    for _ in range(270 if a.build else 0):
+        if builds["data"]:
+            break
+        time.sleep(10)
+        builds = get("/v1/builds", **q)
     if not builds["data"]:
-        sys.exit("Chưa có build VALID (đang xử lý hoặc chưa tải lên).")
+        sys.exit(f"Chưa có build VALID{' số ' + a.build if a.build else ''} (đang xử lý hoặc chưa tải lên).")
     build = builds["data"][0]
     pre = {i["id"]: i for i in builds.get("included", [])}
     build_ver = pre[build["relationships"]["preReleaseVersion"]["data"]["id"]]["attributes"]["version"]

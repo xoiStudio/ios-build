@@ -14,6 +14,10 @@ on:
         description: "true = gửi duyệt khi không có lỗi"
         required: false
         default: "false"
+      build:
+        description: "Số build phải dùng (chờ tới khi VALID); bỏ trống = build VALID mới nhất"
+        required: false
+        default: ""
       replace_inflight:
         description: "true = huỷ đợt gửi đang chờ/đang duyệt rồi thay build mới vào (mất chỗ trong hàng chờ)"
         required: false
@@ -22,7 +26,7 @@ run-name: "Release ${{ inputs.bundle_id }} · ${{ inputs.tag }} · submit=${{ in
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75   # --build chờ Apple xử lý build (tới ~45 phút) + gửi duyệt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,4 +44,4 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: python scripts/asc_release.py bundle ${{ inputs.submit == 'true' && '--submit' || '' }} ${{ inputs.replace_inflight == 'true' && '--replace-inflight' || '' }}
+        run: python scripts/asc_release.py bundle ${{ inputs.submit == 'true' && '--submit' || '' }} ${{ inputs.replace_inflight == 'true' && '--replace-inflight' || '' }} ${{ inputs.build != '' && format('--build {0}', inputs.build) || '' }}
