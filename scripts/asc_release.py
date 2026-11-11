@@ -285,6 +285,8 @@ def main():
             print("  + " + f)
     step("ảnh chụp iPhone 6.9\"", screenshots)
 
+    review_detail_id = []
+
     def review_detail():
         tpl_app = get("/v1/apps", **{"filter[bundleId]": spec.get("review_contact_from", "com.xoigame.stickmanarcherduel")})["data"][0]
         contact = None
@@ -307,9 +309,32 @@ def main():
             call("PATCH", f"/v1/appStoreReviewDetails/{mine['id']}",
                  {"data": {"type": "appStoreReviewDetails", "id": mine["id"], "attributes": attrs}})
         else:
-            call("POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": attrs,
-                 "relationships": {"appStoreVersion": rel("appStoreVersions", vid)}}})
+            mine = call("POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": attrs,
+                        "relationships": {"appStoreVersion": rel("appStoreVersions", vid)}}})["data"]
+        review_detail_id.append(mine["id"])
     step("liên hệ reviewer", review_detail)
+
+    def review_video():
+        """Video quay trên máy thật (Apple 2.1 Information Needed) — đính kèm App Review Information. Trùng tên + cỡ thì giữ."""
+        vids = sorted(f for f in os.listdir(d) if f.lower().startswith("review_video"))
+        olds = get(f"/v1/appStoreReviewDetails/{review_detail_id[0]}/appStoreReviewAttachments")["data"]
+        if not vids:
+            print(f"  (bundle không có video; đang đính kèm {len(olds)} tệp)")
+            return len(olds)
+        path = os.path.join(d, vids[0])
+        size = os.path.getsize(path)
+        if any(o["attributes"].get("fileName") == vids[0] and o["attributes"].get("fileSize") == size for o in olds):
+            print("  (video đã đính kèm, giữ nguyên)")
+            return len(olds)
+        for o in olds:
+            call("DELETE", f"/v1/appStoreReviewAttachments/{o['id']}")
+        upload("/v1/appStoreReviewAttachments", "appStoreReviewAttachments", "appStoreReviewDetail", "appStoreReviewDetails",
+               review_detail_id[0], path)
+        print(f"  + {vids[0]} ({size // 1024} KB)")
+        return 1
+    attached = step("video cho reviewer", review_video) if review_detail_id else 0
+    if a.submit and spec.get("require_review_video") and not attached:
+        ERRORS.append("require_review_video: chưa có video đính kèm cho reviewer (đặt review_video trong appstore.json)")
 
     iap_ids = []
     iap_state = {}
