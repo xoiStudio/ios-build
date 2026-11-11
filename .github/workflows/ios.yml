@@ -1,8 +1,9 @@
 # Build iOS cho MỌI game XoiGame trên máy Mac của GitHub — BẢN GỐC nằm ở GameDevHub/build/ios/ios.yml,
 # đẩy sang repo CI bằng `gdh ios install-workflow`. Đừng sửa thẳng trên repo CI.
 #
-# Project Xcode do Unity xuất trên Windows, `gdh ios push` nén thành ios-xcode.tar.gz, gắn vào một
-# GitHub Release của repo này rồi chạy workflow với bundle_id của game.
+# Project Xcode do Unity xuất trên Windows (hoặc ios/ của app Capacitor + các gói node_modules Podfile cần),
+# `gdh ios push` nén thành ios-xcode.tar.gz, gắn vào một GitHub Release của repo này rồi chạy workflow với
+# bundle_id của game (Capacitor thêm xcode_dir=ios/App, workspace=App.xcworkspace, scheme=App).
 #
 #  · Chưa có secret ASC_* → chỉ build KHÔNG ký (kiểm project Xcode biên dịch được).
 #  · Có đủ ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 / CERT_PRIVATE_KEY → ký bằng chứng chỉ THƯỜNG
@@ -21,6 +22,18 @@ on:
         description: "Bundle id của game (vd. com.xoigame.stickmanarcherduel)"
         required: false
         default: "com.xoigame.lasttowermonster"
+      xcode_dir:
+        description: "Thư mục (trong gói) chứa Podfile + workspace. Unity = '.', app Capacitor = 'ios/App'"
+        required: false
+        default: "."
+      workspace:
+        description: "Workspace Xcode (Unity-iPhone.xcworkspace | App.xcworkspace)"
+        required: false
+        default: "Unity-iPhone.xcworkspace"
+      scheme:
+        description: "Scheme Xcode (Unity-iPhone | App)"
+        required: false
+        default: "Unity-iPhone"
 
 run-name: "iOS ${{ inputs.bundle_id }} · ${{ inputs.tag }}"
 
@@ -31,6 +44,8 @@ jobs:
     env:
       TEAM_ID: 3VBMH5K7LL
       BUNDLE_ID: ${{ inputs.bundle_id }}
+      WORKSPACE: ${{ inputs.workspace || 'Unity-iPhone.xcworkspace' }}
+      SCHEME: ${{ inputs.scheme || 'Unity-iPhone' }}
       HAS_KEY: ${{ secrets.ASC_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -49,20 +64,20 @@ jobs:
           xcodebuild -version
 
       - name: pod install
-        working-directory: xcode
+        working-directory: xcode/${{ inputs.xcode_dir || '.' }}
         run: pod install --repo-update
 
       - name: Build không ký (chưa có API key)
         if: env.HAS_KEY != 'true'
-        working-directory: xcode
+        working-directory: xcode/${{ inputs.xcode_dir || '.' }}
         run: |
-          xcodebuild -workspace Unity-iPhone.xcworkspace -scheme Unity-iPhone \
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO build | tail -200
 
       - name: Ký + tải lên TestFlight (codemagic-cli-tools, chứng chỉ thường)
         if: env.HAS_KEY == 'true'
-        working-directory: xcode
+        working-directory: xcode/${{ inputs.xcode_dir || '.' }}
         env:
           APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.ASC_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -80,7 +95,7 @@ jobs:
             --certificate-key=@file:"$RUNNER_TEMP/cert_key" --create
           keychain add-certificates
           xcode-project use-profiles
-          xcode-project build-ipa --workspace Unity-iPhone.xcworkspace --scheme Unity-iPhone
+          xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"
           IPA=$(ls "$PWD"/build/ios/ipa/*.ipa)
           app-store-connect publish --path "$IPA"
 
