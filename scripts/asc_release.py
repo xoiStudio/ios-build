@@ -124,6 +124,8 @@ def main():
     a = ap.parse_args()
     d = a.bundle_dir
     spec = json.load(open(os.path.join(d, "appstore.json"), encoding="utf-8"))
+    if a.submit and "{VIDEO_URL}" in spec.get("review_notes", ""):
+        sys.exit("review_notes còn chỗ trống {VIDEO_URL} — điền link video quay trên máy thật rồi mới gửi duyệt.")
     bundle = spec["bundle_id"]
     loc_name = spec.get("locale", "en-US")
 
@@ -310,6 +312,7 @@ def main():
     step("liên hệ reviewer", review_detail)
 
     iap_ids = []
+    iap_state = {}
 
     def iaps():
         existing = {i["attributes"]["productId"]: i for i in all_pages(f"/v1/apps/{app_id}/inAppPurchasesV2")}
@@ -322,6 +325,11 @@ def main():
                 "relationships": {"app": rel("apps", app_id)}}})["data"]
             iap_id = iap["id"]
             iap_ids.append(iap_id)
+            iap_state[iap_id] = iap["attributes"].get("state")
+            if pid in existing and iap_state[iap_id] not in ("APPROVED", "WAITING_FOR_REVIEW", "IN_REVIEW"):
+                # IAP bị kéo ra khỏi đợt gửi (DEVELOPER_REJECTED / MISSING_METADATA): ghi lại ghi chú duyệt để Apple tính lại trạng thái.
+                call("PATCH", f"/v2/inAppPurchases/{iap_id}", {"data": {"type": "inAppPurchases", "id": iap_id, "attributes": {
+                    "reviewNote": it.get("review_note", "Unlocks in-game content. Open the shop from the main menu.")}}})
             locs_ = get(f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")["data"]
             if not any(l["attributes"]["locale"] == loc_name for l in locs_):
                 call("POST", "/v1/inAppPurchaseLocalizations", {"data": {"type": "inAppPurchaseLocalizations", "attributes": {
@@ -390,12 +398,21 @@ def main():
             except RuntimeError as e:
                 if "409" not in str(e) or "already" not in str(e).lower():
                     raise
-            for iap_id in iap_ids:   # IAP đầu tiên đi cùng phiên bản
+            fails = []
+            for iap_id in iap_ids:   # IAP chưa duyệt PHẢI đi cùng phiên bản (Guideline 3.1.1) — gửi hỏng thì KHÔNG gửi phiên bản
+                if iap_state.get(iap_id) in ("APPROVED", "WAITING_FOR_REVIEW", "IN_REVIEW"):
+                    continue
                 try:
                     call("POST", "/v1/inAppPurchaseSubmissions", {"data": {"type": "inAppPurchaseSubmissions",
                          "relationships": {"inAppPurchaseV2": rel("inAppPurchases", iap_id)}}}, quiet=True)
+                    print(f"  + IAP {iap_id}")
                 except RuntimeError as e:
-                    print(f"  (IAP {iap_id} chưa gửi riêng được: {str(e)[:200]})")
+                    if "already" in str(e).lower():
+                        continue
+                    state = get(f"/v2/inAppPurchases/{iap_id}")["data"]["attributes"].get("state")
+                    fails.append(f"IAP {iap_id} ({state}): {str(e)[:900]}")
+            if fails:
+                raise RuntimeError("không gửi kèm được IAP — dừng, chưa gửi phiên bản: " + " | ".join(fails))
             call("PATCH", f"/v1/reviewSubmissions/{sub['id']}", {"data": {"type": "reviewSubmissions", "id": sub["id"],
                  "attributes": {"submitted": True}}})
             print("  ĐÃ GỬI DUYỆT")
