@@ -262,13 +262,13 @@ def main():
                 raise
     step(f"mở {len(territories)} quốc gia", availability)
 
-    def screenshots():
-        shots = sorted(f for f in os.listdir(os.path.join(d, "screenshots")) if f.lower().endswith(".png"))
+    def screenshots(folder="screenshots", display="APP_IPHONE_67"):
+        shots = sorted(f for f in os.listdir(os.path.join(d, folder)) if f.lower().endswith(".png"))
         sets = get(f"/v1/appStoreVersionLocalizations/{vloc['id']}/appScreenshotSets")["data"]
-        sset = next((s for s in sets if s["attributes"]["screenshotDisplayType"] == "APP_IPHONE_67"), None)
+        sset = next((s for s in sets if s["attributes"]["screenshotDisplayType"] == display), None)
         if sset is None:
             sset = call("POST", "/v1/appScreenshotSets", {"data": {"type": "appScreenshotSets",
-                        "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
+                        "attributes": {"screenshotDisplayType": display},
                         "relationships": {"appStoreVersionLocalization": rel("appStoreVersionLocalizations", vloc["id"])}}})["data"]
         olds = get(f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]
         # Đủ ảnh, đúng tên, không cái nào FAILED ⇒ giữ nguyên (ảnh đang xử lý mà xoá đi tải lại là Apple xử lý lại từ đầu).
@@ -281,9 +281,11 @@ def main():
             call("DELETE", f"/v1/appScreenshots/{old['id']}")
         for f in shots[:10]:
             upload("/v1/appScreenshots", "appScreenshots", "appScreenshotSet", "appScreenshotSets", sset["id"],
-                   os.path.join(d, "screenshots", f))
+                   os.path.join(d, folder, f))
             print("  + " + f)
     step("ảnh chụp iPhone 6.9\"", screenshots)
+    if os.path.isdir(os.path.join(d, "screenshots_ipad")):   # app iPhone + iPad: App Store bắt bộ ảnh iPad 13"
+        step("ảnh chụp iPad 13\"", lambda: screenshots("screenshots_ipad", "APP_IPAD_PRO_3GEN_129"))
 
     review_detail_id = []
 
@@ -403,7 +405,7 @@ def main():
             for _ in range(90):
                 sets = get(f"/v1/appStoreVersionLocalizations/{vloc['id']}/appScreenshotSets")["data"]
                 states = [(x["attributes"].get("assetDeliveryState") or {}).get("state")
-                          for st in sets for x in get(f"/v1/appScreenshotSets/{st['id']}/appScreenshots")["data"]]
+                          for st in sets for x in get(f"/v1/appScreenshotSets/{st['id']}/appScreenshots")["data"]]   # gồm cả bộ iPad
                 if all(st == "COMPLETE" for st in states):
                     print(f"  ảnh xử lý xong ({len(states)})")
                     return
